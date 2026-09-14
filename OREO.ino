@@ -6,7 +6,10 @@ const int dir2 = 4;
 
 // hello 
 
+//TEST TEST CAIO pUSH!
 
+
+// woahhh This is CAIO testing 
 
 const int ch1Pin = 5; // Signal wire connected to Digital Pin 2
 const int ch2Pin = 6; // Signal wire connected to Digital Pin 3
