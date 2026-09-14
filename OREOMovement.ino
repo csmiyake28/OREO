@@ -37,12 +37,11 @@ void loop() {
   ch4Value = pulseIn(ch4Pin, HIGH, 25000);
   ch3Value = pulseIn(ch3Pin, HIGH, 25000);
   ch2Value = pulseIn(ch2Pin, HIGH, 25000);
- 
-  
+
+
   //Debugging seeing the rawCH1 & rawCh3
 
   delay(67);
-
 
   //testing testing!
 
