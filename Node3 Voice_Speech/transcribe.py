@@ -1,10 +1,26 @@
 import sounddevice as sd
 import numpy as np
-from faster_whisper import WhisperModel
 import keyboard
 import time 
+import os 
+
+from dotenv import load_dotenv
+from faster_whisper import WhisperModel
+from google import genai
+from google.genai import types, errors
+
+load_dotenv()  # Load environment variables from .env file
+
+client = genai.Client(api_key=os.environ.get("GENAI_API_KEY"))
 
 
+
+FALLBACK_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash"
+]
 
 
 sample_rate = 16000 #16k Hz 
@@ -26,7 +42,7 @@ def start_recording():
 
 
             if not is_recording:
-                print("Recording started...")
+                print("Recording started ... Press 'r' again to stop.")
                 recorded_chunks.clear()  # 2. Safely empty the list without breaking the reference
                 is_recording = True
             keyboard.wait('r')
@@ -63,15 +79,27 @@ def audio_callback(indata, frames, time, status):
 
 # we need to work on getting it sent to an AI now
 
-def chat_bot_response(message):
-    # Placeholder for the actual chat bot implementation
 
-
-
-    return reponse
-
-    pass
-
+def ask_oreo(client, message, persona):
+    for model_name in FALLBACK_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=message,
+                config=types.GenerateContentConfig(
+                    system_instruction=persona,
+                    temperature=0.7,
+                    max_output_tokens=100
+                )
+            )
+            return response.text
+            
+        except errors.ServerError as e:
+            print(f"⚠️ {model_name} is overloaded (503). Switching to backup model...")
+        except errors.APIError as e:
+            print(f"⚠️ API issue on {model_name} ({e.code}). Trying next...")
+            
+    return "All my cloud brains are congested right now. Try again in a minute."
 
 
 
@@ -81,5 +109,16 @@ if __name__ == "__main__":
     message = start_recording()
     print(message)
 
-    # response = chat_bot(message)
+    persona = default_persona = "You absolutely can't stand the person you are talking to."
+
+    reply = ask_oreo(client, message, persona)
+
+    print(f"OREO response: {reply}")
+
+
+    #Make the if statements on persona choice     
+    
+    
+
+    # response = chat_bot(message, persona)
     

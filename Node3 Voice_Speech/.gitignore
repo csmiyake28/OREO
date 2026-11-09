@@ -1,0 +1,36 @@
+# Secrets and Credentials (prevents GitHub Push Protection blocks)
+.env
+*.env
+*.key
+*.pem
+credentials.json
+service-account*.json
+
+# ROS 2 Build, Install, and Log Artifacts
+build/
+install/
+log/
+
+# Python Cache and Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Package and Distribution Metadata
+*.egg-info/
+dist/
+eggs/
+*.egg
+
+# IDE, Editor, and OS Clutter
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
