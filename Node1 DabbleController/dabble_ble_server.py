@@ -1,8 +1,7 @@
 # ************************************************************
 # File name: dabble_ble_server.py
-# Purpose: BLE server for Dabble digital Gamepad
-# Hardware: Orange Pi Zero 3W
-# Operating System: Linux
+# Purpose: Dabble BLE GATT Server for Orange Pi
+# Operating System: Ubuntu Linux
 # Future integration: ROS 2
 # ************************************************************
 
@@ -11,70 +10,322 @@ import sys
 from dabble_bluetooth import DabbleReceiver
 
 
-# Bluetooth configuration
+# Dabble Bluetooth configuration
 DEVICE_NAME = "OrangePi_Dabble"
 
 SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-
 RX_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-
 TX_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
 
-# Create the Dabble receiver
+# BlueZ interfaces
+BLUEZ = "org.bluez"
+GATT_MANAGER = "org.bluez.GattManager1"
+ADV_MANAGER = "org.bluez.LEAdvertisingManager1"
+
+GATT_SERVICE = "org.bluez.GattService1"
+GATT_CHARACTERISTIC = "org.bluez.GattCharacteristic1"
+
+ADVERTISEMENT = "org.bluez.LEAdvertisement1"
+PROPERTIES = "org.freedesktop.DBus.Properties"
+OBJECT_MANAGER = "org.freedesktop.DBus.ObjectManager"
+
+
+# Our existing Dabble receiver
 receiver = DabbleReceiver()
 
 
-# Handle data received from the Bluetooth characteristic
 def on_ble_data(data):
 
-    print("BLE data received:", data.hex(" ").upper())
+    print("BLE received:", data.hex(" ").upper())
 
     receiver.receive_data(data)
 
 
-# Check operating system
-def check_platform():
+def main():
 
+    # BlueZ server requires Ubuntu/Linux
     if sys.platform != "linux":
 
-        print("This BLE server requires Linux.")
-        print("Current platform:", sys.platform)
-        print("Simulation mode is available on Windows.")
+        print("This program must run on Ubuntu Linux.")
+        return
 
-        return False
+    # Import Linux Bluetooth libraries
+    try:
+        import dbus
+        import dbus.service
+        import dbus.mainloop.glib
 
-    print("Linux detected.")
-    print("Preparing BlueZ Bluetooth server...")
+        from gi.repository import GLib
 
-    return True
+    except ImportError as error:
 
+        print("Missing Linux Bluetooth dependency:", error)
+        return
 
-# Test the BLE data callback
-def test_ble_callback():
+    # Initialize D-Bus
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
-    print("\nTesting BLE callback")
+    bus = dbus.SystemBus()
+    loop = GLib.MainLoop()
 
-    test_packet = bytes.fromhex(
-        "FF 01 01 01 02 00 01 00"
+    APP_PATH = "/com/orangepi/dabble"
+    SERVICE_PATH = APP_PATH + "/service0"
+    RX_PATH = SERVICE_PATH + "/char0"
+    TX_PATH = SERVICE_PATH + "/char1"
+    ADV_PATH = APP_PATH + "/advertisement0"
+
+    # --------------------------------------------------------
+    # GATT Application
+    # --------------------------------------------------------
+
+    class Application(dbus.service.Object):
+
+        def __init__(self):
+            super().__init__(bus, APP_PATH)
+
+        @dbus.service.method(
+            OBJECT_MANAGER,
+            out_signature="a{oa{sa{sv}}}"
+        )
+        def GetManagedObjects(self):
+
+            return {
+                SERVICE_PATH: {
+                    GATT_SERVICE: service_properties()
+                },
+                RX_PATH: {
+                    GATT_CHARACTERISTIC: rx_properties()
+                },
+                TX_PATH: {
+                    GATT_CHARACTERISTIC: tx_properties()
+                }
+            }
+
+    # --------------------------------------------------------
+    # GATT Service
+    # --------------------------------------------------------
+
+    def service_properties():
+
+        return {
+            "UUID": SERVICE_UUID,
+            "Primary": dbus.Boolean(True),
+            "Includes": dbus.Array([], signature="o")
+        }
+
+    class DabbleService(dbus.service.Object):
+
+        def __init__(self):
+            super().__init__(bus, SERVICE_PATH)
+
+        @dbus.service.method(
+            PROPERTIES,
+            in_signature="s",
+            out_signature="a{sv}"
+        )
+        def GetAll(self, interface):
+
+            if interface != GATT_SERVICE:
+                raise ValueError("Unknown interface")
+
+            return service_properties()
+
+    # --------------------------------------------------------
+    # RX Characteristic: iPhone -> Orange Pi
+    # --------------------------------------------------------
+
+    def rx_properties():
+
+        return {
+            "UUID": RX_UUID,
+            "Service": dbus.ObjectPath(SERVICE_PATH),
+            "Flags": dbus.Array(["write"], signature="s")
+        }
+
+    class RXCharacteristic(dbus.service.Object):
+
+        def __init__(self):
+            super().__init__(bus, RX_PATH)
+
+        @dbus.service.method(
+            PROPERTIES,
+            in_signature="s",
+            out_signature="a{sv}"
+        )
+        def GetAll(self, interface):
+
+            if interface != GATT_CHARACTERISTIC:
+                raise ValueError("Unknown interface")
+
+            return rx_properties()
+
+        @dbus.service.method(
+            GATT_CHARACTERISTIC,
+            in_signature="aya{sv}",
+            out_signature=""
+        )
+        def WriteValue(self, value, options):
+
+            data = bytes(value)
+
+            on_ble_data(data)
+
+    # --------------------------------------------------------
+    # TX Characteristic: Orange Pi -> iPhone
+    # --------------------------------------------------------
+
+    def tx_properties():
+
+        return {
+            "UUID": TX_UUID,
+            "Service": dbus.ObjectPath(SERVICE_PATH),
+            "Flags": dbus.Array(["notify"], signature="s")
+        }
+
+    class TXCharacteristic(dbus.service.Object):
+
+        def __init__(self):
+            super().__init__(bus, TX_PATH)
+            self.notifying = False
+
+        @dbus.service.method(
+            PROPERTIES,
+            in_signature="s",
+            out_signature="a{sv}"
+        )
+        def GetAll(self, interface):
+
+            return tx_properties()
+
+        @dbus.service.method(
+            GATT_CHARACTERISTIC,
+            in_signature="",
+            out_signature=""
+        )
+        def StartNotify(self):
+
+            self.notifying = True
+            print("Notifications enabled")
+
+        @dbus.service.method(
+            GATT_CHARACTERISTIC,
+            in_signature="",
+            out_signature=""
+        )
+        def StopNotify(self):
+
+            self.notifying = False
+            print("Notifications disabled")
+
+    # --------------------------------------------------------
+    # BLE Advertisement
+    # --------------------------------------------------------
+
+    class DabbleAdvertisement(dbus.service.Object):
+
+        def __init__(self):
+            super().__init__(bus, ADV_PATH)
+
+        @dbus.service.method(
+            PROPERTIES,
+            in_signature="s",
+            out_signature="a{sv}"
+        )
+        def GetAll(self, interface):
+
+            if interface != ADVERTISEMENT:
+                raise ValueError("Unknown interface")
+
+            return {
+                "Type": "peripheral",
+                "ServiceUUIDs": dbus.Array(
+                    [SERVICE_UUID], signature="s"
+                ),
+                "LocalName": DEVICE_NAME
+            }
+
+        @dbus.service.method(
+            ADVERTISEMENT,
+            in_signature="",
+            out_signature=""
+        )
+        def Release(self):
+
+            print("Advertisement released")
+
+    # --------------------------------------------------------
+    # Communication watchdog
+    # --------------------------------------------------------
+
+    def check_connection():
+
+        receiver.check_timeout()
+
+        return True
+
+    # --------------------------------------------------------
+    # Register Bluetooth services
+    # --------------------------------------------------------
+
+    app = Application()
+    service = DabbleService()
+    rx = RXCharacteristic()
+    tx = TXCharacteristic()
+    advertisement = DabbleAdvertisement()
+
+    adapter_path = "/org/bluez/hci0"
+
+    adapter = bus.get_object(BLUEZ, adapter_path)
+
+    gatt_manager = dbus.Interface(adapter, GATT_MANAGER)
+    adv_manager = dbus.Interface(adapter, ADV_MANAGER)
+
+    def on_error(error):
+
+        print("Bluetooth registration failed:", error)
+        receiver.disconnect()
+        loop.quit()
+
+    def on_advertisement_ready():
+
+        print("BLE advertising started!")
+        print("Device name:", DEVICE_NAME)
+        print("Waiting for Dabble connection...")
+
+    def on_application_ready():
+
+        print("GATT application registered")
+
+        adv_manager.RegisterAdvertisement(
+            ADV_PATH,
+            {},
+            reply_handler=on_advertisement_ready,
+            error_handler=on_error
+        )
+
+    gatt_manager.RegisterApplication(
+        APP_PATH,
+        {},
+        reply_handler=on_application_ready,
+        error_handler=on_error
     )
 
-    on_ble_data(test_packet)
+    # Check communication every 100 milliseconds
+    GLib.timeout_add(100, check_connection)
 
-    receiver.disconnect()
+    print("Starting Dabble BLE Server...")
+
+    try:
+        loop.run()
+
+    except KeyboardInterrupt:
+        print("Stopping Bluetooth server...")
+
+    finally:
+        receiver.disconnect()
 
 
 # Main program
 if __name__ == "__main__":
-
-    print("Dabble BLE Server")
-    print("-------------------------")
-
-    print("Device name:", DEVICE_NAME)
-    print("Service UUID:", SERVICE_UUID)
-
-    if check_platform():
-        print("Linux BLE GATT server not implemented yet.")
-
-    else:
-        test_ble_callback()
+    main()
